@@ -1,20 +1,24 @@
 (ns nnet-clojure.core
-  (:require [loom.graph :as g]
-            [loom.attr :as atr]
-            [loom.alg :as alg]
+  (:require [loom.graph :as gr]
             [loom.io :as io])
   (:gen-class))
 
+(declare evaluate-input get-activations build-net
+         train epoch updated-network updated-node-weights
+         delta cross sigmoid get-node-id evaluate-performance
+         similar? training-msg)
+
 (defn -main
   "I don't do a whole lot ... yet."
-  [& args]
-  (def network (build-net [4 2 4] #(/ (- (rand) 0.5) 10) 2))
-  (def examples '({:input [0 0 0 0] :output [0.1 0.1 0.1 0.1]}
-                  {:input [0 0 0 1] :output [0.1 0.1 0.1 0.9]}
-                  {:input [0 0 1 0] :output [0.1 0.1 0.9 0.1]}
-                  {:input [0 1 0 0] :output [0.1 0.9 0.1 0.1]}
-                  {:input [1 0 0 0] :output [0.9 0.1 0.1 0.1]}))
-  (def trained-net (train network examples 1000)))
+  [& args])
+
+(defn evaluate-performance
+  "returns the fraction of the examples that the network classified correctly"
+  ([network data-set equivalence-func]
+   (/ (reduce + (map #(if (equivalence-func (:output %) (evaluate-input network (:input %))) 1 0) (:examples data-set)))
+      (count (:examples data-set))))
+  ([network data-set]
+   (evaluate-performance network data-set similar?)))
 
 (defn evaluate-input
   "returns the activations of the output layer"
@@ -40,25 +44,38 @@
 
 (defn build-net
   "creates the structure of the graph"
-  [nodes-in-layers weight-init-func learning-rate]
+  [net-name nodes-in-layers weight-init-func learning-rate]
   (let [layers (map #(take % (repeatedly get-node-id)) nodes-in-layers)
         bias-node (get-node-id)
         intra-layer-edges (reduce into (map cross layers (rest layers)))
         bias-edges (map (partial vector bias-node) (reduce into (rest layers)))
         graph (apply gr/weighted-digraph (map #(conj % (weight-init-func)) (into intra-layer-edges bias-edges)))]
-    {:graph graph
+    {:name net-name
+     :graph graph
      :layers layers
      :bias-node bias-node
      :learning-rate learning-rate}))
 
 (defn train
   "just backpropagation"
-  [network examples epochs]
-  (loop [network network
-         epochs-left epochs]
-    (if (> epochs-left 0)
-      (recur (epoch network examples) (dec epochs-left))
-      network)))
+  ([network data-set epochs]
+   (training-msg network data-set)
+   (loop [network network
+          epochs-left epochs]
+     (println "epochs left: " epochs-left)
+     (if (> epochs-left 0)
+       (recur (epoch network (:examples data-set)) (dec epochs-left))
+       network)))
+  ([network data-set]
+   (training-msg network data-set)
+   (loop [network network
+          performance (evaluate-performance network data-set)]
+     (println "performance:" performance)
+     (if (= performance 1)
+       network
+       (recur (epoch network (:examples data-set))
+              (evaluate-performance network data-set))))))
+
 
 (defn epoch
   [network examples]
@@ -105,7 +122,6 @@
 
 (def delta
   (memoize (fn [network activations output-targets node]
-             ; (println "some result: " (some node (last (:layers network))))
              (if (some (partial = node) (last (:layers network)))
                (* (- (activations node) (output-targets node)) (activations node) (- 1 (activations node)))
                (* (activations node)
@@ -113,6 +129,19 @@
                   (reduce + (map #(* (delta network activations output-targets (second %))
                                      (gr/weight (:graph network) (first %) (second %)))
                                  (gr/out-edges (:graph network) node))))))))
+
+(defn training-msg
+  [network data-set]
+   (println (str "\n" (apply str (take 35 (repeat "#")))
+                 "\nTraining..."
+                 "\n  Network: " (:name network)
+                 "\n  Data Set: " (:name data-set)
+                 "\n" (apply str (take 35 (repeat "#"))))))
+
+
+(defn similar?
+  [vec1 vec2]
+  (= (map #(Math/round %) vec1) (map #(Math/round %) vec2)))
 
 (defn cross
   "returns one set cross another"
@@ -132,7 +161,7 @@
     (swap! current-node-id inc)
     @current-node-id))
 
-(defmacro par
-  "short for print-and-return. a macro I used for debuging"
-  [form]
-  `(do (println ~form) ~form))
+; (defmacro prret
+;   "short for print-and-return. a macro I used for debuging"
+;   [form]
+;   `(do (println ~form) ~form))
