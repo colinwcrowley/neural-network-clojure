@@ -15,8 +15,7 @@
 (defn evaluate-performance
   "returns the fraction of the examples that the network classified correctly"
   ([network data-set equivalence-func]
-   (/ (reduce + (map #(if (equivalence-func (:output %) (evaluate-input network (:input %))) 1 0) (:examples data-set)))
-      (count (:examples data-set))))
+   (reduce + (map #(if (equivalence-func (:output %) (evaluate-input network (:input %))) 1 0) (:examples data-set))))
   ([network data-set]
    (evaluate-performance network data-set similar?)))
 
@@ -58,23 +57,26 @@
 
 (defn train
   "just backpropagation"
-  ([network data-set epochs]
-   (training-msg network data-set)
+  ([network training-set test-set epochs]
+   (training-msg network training-set test-set)
    (loop [network network
           epochs-left epochs]
-     (println "epochs left: " epochs-left)
+     (println "epochs left ->" epochs-left
+              "performance on" (:name test-set) "->" (evaluate-performance network test-set) "/" (count (:examples test-set)))
      (if (> epochs-left 0)
-       (recur (epoch network (:examples data-set)) (dec epochs-left))
+       (recur (epoch network (:examples training-set)) (dec epochs-left))
        network)))
-  ([network data-set]
-   (training-msg network data-set)
+  ([network training-set test-set]
+   (training-msg network training-set test-set)
    (loop [network network
-          performance (evaluate-performance network data-set)]
-     (println "performance:" performance)
-     (if (= performance 1)
-       network
-       (recur (epoch network (:examples data-set))
-              (evaluate-performance network data-set))))))
+          past-performances (list (evaluate-performance network test-set))]
+     (println "performance on" (:name test-set) "->" (evaluate-performance network test-set) "/" (count (:examples test-set)))
+     (let [new-performance (evaluate-performance network test-set)]
+       (if (and (> (count past-performances) 1) (<= new-performance (second past-performances)))
+             (do (println "End of training: performance no longer increasing")
+                 network)
+             (recur (loop [network network n 10] (if (= n 0) network (recur (epoch network (:examples training-set)) (dec n))))
+                    (conj past-performances new-performance)))))))
 
 
 (defn epoch
@@ -131,12 +133,15 @@
                                  (gr/out-edges (:graph network) node))))))))
 
 (defn training-msg
-  [network data-set]
+  ([network training-set test-set]
    (println (str "\n" (apply str (take 35 (repeat "#")))
                  "\nTraining..."
                  "\n  Network: " (:name network)
-                 "\n  Data Set: " (:name data-set)
+                 "\n  Training Set: " (:name training-set)
+                 "\n  Test Set: " (:name test-set)
                  "\n" (apply str (take 35 (repeat "#"))))))
+  ([network training-set]
+   (training-msg training-set {:name "None"})))
 
 
 (defn similar?
